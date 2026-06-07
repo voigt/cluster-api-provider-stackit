@@ -1,0 +1,457 @@
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: Cluster
+metadata:
+  name: ${CLUSTER_NAME}
+  namespace: ${NAMESPACE}
+  labels:
+    cluster-api-provider-stackit/cloud-provider-stackit: "true"
+spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks:
+        - 192.168.0.0/16
+    services:
+      cidrBlocks:
+        - 10.128.0.0/12
+  infrastructureRef:
+    apiGroup: infrastructure.cluster.x-k8s.io
+    kind: StackitCluster
+    name: ${CLUSTER_NAME}
+  controlPlaneRef:
+    apiGroup: controlplane.cluster.x-k8s.io
+    kind: KubeadmControlPlane
+    name: ${CLUSTER_NAME}-control-plane
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: StackitCluster
+metadata:
+  name: ${CLUSTER_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  projectID: ${STACKIT_PROJECT_ID}
+  region: ${STACKIT_REGION}
+  credentialsSecretRef:
+    name: ${STACKIT_CREDENTIALS_SECRET_NAME}
+    namespace: ${NAMESPACE}
+  network:
+    id: ${STACKIT_NETWORK_ID}
+  apiServerLoadBalancer:
+    enabled: true
+  bastion:
+    enabled: false
+---
+apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+kind: KubeadmControlPlane
+metadata:
+  name: ${CLUSTER_NAME}-control-plane
+  namespace: ${NAMESPACE}
+spec:
+  replicas: ${CONTROL_PLANE_MACHINE_COUNT}
+  version: ${KUBERNETES_VERSION}
+  machineTemplate:
+    spec:
+      infrastructureRef:
+        apiGroup: infrastructure.cluster.x-k8s.io
+        kind: StackitMachineTemplate
+        name: ${CLUSTER_NAME}-control-plane
+  kubeadmConfigSpec:
+    preKubeadmCommands:
+      - |
+        set -eu
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update
+        apt-get install -y apt-transport-https ca-certificates conntrack curl gpg containerd
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/${KUBERNETES_APT_REPOSITORY_MINOR}/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        chmod 0644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/${KUBERNETES_APT_REPOSITORY_MINOR}/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+        apt-get update
+        apt-get install -y kubelet kubeadm kubectl
+        apt-mark hold kubelet kubeadm kubectl
+        mkdir -p /etc/containerd
+        containerd config default > /etc/containerd/config.toml
+        sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+        systemctl restart containerd
+        modprobe br_netfilter
+        printf 'net.bridge.bridge-nf-call-iptables=1\nnet.ipv4.ip_forward=1\n' > /etc/sysctl.d/99-kubernetes-cri.conf
+        sysctl --system
+        (journalctl -fu kubelet --no-pager > /dev/console 2>&1 &)
+    initConfiguration:
+      nodeRegistration:
+        name: "{{ ds.meta_data.local_hostname }}"
+        criSocket: unix:///var/run/containerd/containerd.sock
+        kubeletExtraArgs:
+          - name: cloud-provider
+            value: external
+    joinConfiguration:
+      nodeRegistration:
+        name: "{{ ds.meta_data.local_hostname }}"
+        criSocket: unix:///var/run/containerd/containerd.sock
+        kubeletExtraArgs:
+          - name: cloud-provider
+            value: external
+    clusterConfiguration:
+      controllerManager:
+        extraArgs:
+          - name: cloud-provider
+            value: external
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: StackitMachineTemplate
+metadata:
+  name: ${CLUSTER_NAME}-control-plane
+  namespace: ${NAMESPACE}
+spec:
+  template:
+    spec:
+      imageID: ${STACKIT_IMAGE_ID}
+      machineType: ${STACKIT_MACHINE_TYPE}
+      rootVolume:
+        sizeGiB: 50
+        performanceClass: storage_premium_perf6
+        deleteOnTermination: true
+      network:
+        id: ${STACKIT_NETWORK_ID}
+---
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: MachineDeployment
+metadata:
+  name: ${CLUSTER_NAME}-md-0
+  namespace: ${NAMESPACE}
+spec:
+  clusterName: ${CLUSTER_NAME}
+  replicas: ${WORKER_MACHINE_COUNT}
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: ${CLUSTER_NAME}
+      cluster.x-k8s.io/deployment-name: ${CLUSTER_NAME}-md-0
+  template:
+    metadata:
+      labels:
+        cluster.x-k8s.io/cluster-name: ${CLUSTER_NAME}
+        cluster.x-k8s.io/deployment-name: ${CLUSTER_NAME}-md-0
+    spec:
+      clusterName: ${CLUSTER_NAME}
+      version: ${KUBERNETES_VERSION}
+      bootstrap:
+        configRef:
+          apiGroup: bootstrap.cluster.x-k8s.io
+          kind: KubeadmConfigTemplate
+          name: ${CLUSTER_NAME}-md-0
+      infrastructureRef:
+        apiGroup: infrastructure.cluster.x-k8s.io
+        kind: StackitMachineTemplate
+        name: ${CLUSTER_NAME}-md-0
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: StackitMachineTemplate
+metadata:
+  name: ${CLUSTER_NAME}-md-0
+  namespace: ${NAMESPACE}
+spec:
+  template:
+    spec:
+      imageID: ${STACKIT_WORKER_IMAGE_ID}
+      machineType: ${STACKIT_MACHINE_TYPE}
+      rootVolume:
+        sizeGiB: 50
+        performanceClass: storage_premium_perf6
+        deleteOnTermination: true
+      network:
+        id: ${STACKIT_NETWORK_ID}
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+kind: KubeadmConfigTemplate
+metadata:
+  name: ${CLUSTER_NAME}-md-0
+  namespace: ${NAMESPACE}
+spec:
+  template:
+    spec:
+      format: ignition
+      preKubeadmCommands:
+        - |
+          set -eu
+          hostname="$(awk -F= '$1=="COREOS_OPENSTACK_HOSTNAME"{gsub(/"/, "", $2); print $2}' /run/metadata/flatcar)"
+          test -n "$hostname"
+          sed -i "s/^  name: .*/  name: $hostname/" /etc/kubeadm.yml
+      ignition:
+        containerLinuxConfig:
+          additionalConfig: |
+            storage:
+              files:
+                - path: /opt/bin/kubeadm
+                  mode: 0755
+                  contents:
+                    remote:
+                      url: https://dl.k8s.io/${KUBERNETES_VERSION}/bin/linux/amd64/kubeadm
+                - path: /opt/bin/kubelet
+                  mode: 0755
+                  contents:
+                    remote:
+                      url: https://dl.k8s.io/${KUBERNETES_VERSION}/bin/linux/amd64/kubelet
+                - path: /etc/systemd/system/kubelet.service
+                  contents:
+                    remote:
+                      url: https://raw.githubusercontent.com/kubernetes/release/refs/tags/v0.18.0/cmd/krel/templates/latest/kubelet/kubelet.service
+                - path: /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+                  contents:
+                    remote:
+                      url: https://raw.githubusercontent.com/kubernetes/release/refs/tags/v0.18.0/cmd/krel/templates/latest/kubeadm/10-kubeadm.conf
+                - path: /etc/modules-load.d/kubernetes.conf
+                  mode: 0644
+                  contents:
+                    inline: |
+                      br_netfilter
+                - path: /etc/sysctl.d/99-kubernetes-cri.conf
+                  mode: 0644
+                  contents:
+                    inline: |
+                      net.bridge.bridge-nf-call-iptables=1
+                      net.ipv4.ip_forward=1
+            systemd:
+              units:
+                - name: kubelet.service
+                  enabled: true
+                  dropins:
+                    - name: 20-flatcar-path.conf
+                      contents: |
+                        [Service]
+                        ExecStart=
+                        ExecStart=/opt/bin/kubelet $KUBELET_KUBECONFIG_ARGS $KUBELET_CONFIG_ARGS $KUBELET_KUBEADM_ARGS $KUBELET_EXTRA_ARGS
+                - name: kubeadm.service
+                  enabled: true
+                  dropins:
+                    - name: 20-flatcar-path.conf
+                      contents: |
+                        [Unit]
+                        Requires=containerd.service
+                        After=containerd.service network-online.target
+                        [Service]
+                        Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/opt/bin"
+      joinConfiguration:
+        nodeRegistration:
+          name: flatcar-worker
+          criSocket: unix:///var/run/containerd/containerd.sock
+          kubeletExtraArgs:
+            - name: cloud-provider
+              value: external
+---
+apiVersion: addons.cluster.x-k8s.io/v1beta2
+kind: ClusterResourceSet
+metadata:
+  name: ${CLUSTER_NAME}-cloud-provider-stackit
+  namespace: ${NAMESPACE}
+spec:
+  strategy: Reconcile
+  clusterSelector:
+    matchLabels:
+      cluster-api-provider-stackit/cloud-provider-stackit: "true"
+  resources:
+    - kind: Secret
+      name: ${CLUSTER_NAME}-cloud-provider-stackit
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ${CLUSTER_NAME}-cloud-provider-stackit
+  namespace: ${NAMESPACE}
+type: addons.cluster.x-k8s.io/resource-set
+stringData:
+  cloud-provider-stackit.yaml: |
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: kube-system
+    ---
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: stackit-cloud-controller-manager
+      namespace: kube-system
+    ---
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: stackit-cloud-config
+      namespace: kube-system
+    data:
+      cloud.yaml: |
+        global:
+          projectId: ${STACKIT_PROJECT_ID}
+          region: ${STACKIT_REGION}
+        loadBalancer:
+          networkId: ${STACKIT_NETWORK_ID}
+    ---
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: stackit-cloud-secret
+      namespace: kube-system
+    type: Opaque
+    data:
+      sa_key.json: ${STACKIT_SERVICE_ACCOUNT_JSON_B64}
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+      name: stackit-cloud-controller-manager
+    rules:
+      - apiGroups:
+          - coordination.k8s.io
+        resources:
+          - leases
+        verbs:
+          - get
+          - create
+          - update
+      - apiGroups:
+          - ""
+        resources:
+          - events
+        verbs:
+          - create
+          - patch
+          - update
+      - apiGroups:
+          - ""
+        resources:
+          - nodes
+        verbs:
+          - "*"
+      - apiGroups:
+          - ""
+        resources:
+          - nodes/status
+        verbs:
+          - patch
+      - apiGroups:
+          - ""
+        resources:
+          - services
+        verbs:
+          - list
+          - patch
+          - update
+          - watch
+      - apiGroups:
+          - ""
+        resources:
+          - services/status
+        verbs:
+          - patch
+      - apiGroups:
+          - ""
+        resources:
+          - serviceaccounts/token
+        verbs:
+          - create
+      - apiGroups:
+          - ""
+        resources:
+          - serviceaccounts
+        verbs:
+          - create
+          - get
+      - apiGroups:
+          - ""
+        resources:
+          - configmaps
+        verbs:
+          - get
+          - list
+          - watch
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata:
+      name: stackit-cloud-controller-manager
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: stackit-cloud-controller-manager
+    subjects:
+      - kind: ServiceAccount
+        name: stackit-cloud-controller-manager
+        namespace: kube-system
+    ---
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: stackit-cloud-controller-manager
+      namespace: kube-system
+      labels:
+        app: stackit-cloud-controller-manager
+    spec:
+      replicas: 1
+      strategy:
+        type: RollingUpdate
+      selector:
+        matchLabels:
+          app: stackit-cloud-controller-manager
+      template:
+        metadata:
+          labels:
+            app: stackit-cloud-controller-manager
+        spec:
+          serviceAccountName: stackit-cloud-controller-manager
+          dnsPolicy: Default
+          terminationGracePeriodSeconds: 30
+          tolerations:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+              effect: NoSchedule
+            - key: node-role.kubernetes.io/master
+              operator: Exists
+              effect: NoSchedule
+            - key: node.cloudprovider.kubernetes.io/uninitialized
+              operator: Exists
+              effect: NoSchedule
+            - key: node.kubernetes.io/not-ready
+              operator: Exists
+            - key: node.kubernetes.io/unreachable
+              operator: Exists
+          containers:
+            - name: stackit-cloud-controller-manager
+              image: ${STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE}
+              args:
+                - --cloud-provider=stackit
+                - --webhook-secure-port=0
+                - --concurrent-service-syncs=3
+                - --controllers=cloud-node-controller,cloud-node-lifecycle-controller,service-lb-controller
+                - --authorization-always-allow-paths=/metrics
+                - --leader-elect=true
+                - --leader-elect-resource-name=stackit-cloud-controller-manager
+                - --cloud-config=/etc/config/cloud.yaml
+                - --cluster-name=${CLUSTER_NAME}
+              env:
+                - name: STACKIT_SERVICE_ACCOUNT_KEY_PATH
+                  value: /etc/serviceaccount/sa_key.json
+              ports:
+                - containerPort: 10258
+                  name: https
+                  protocol: TCP
+                - containerPort: 9090
+                  name: metrics
+                  protocol: TCP
+              resources:
+                limits:
+                  cpu: 500m
+                  memory: 500Mi
+                requests:
+                  cpu: 100m
+                  memory: 100Mi
+              volumeMounts:
+                - mountPath: /etc/config
+                  name: cloud-config
+                  readOnly: true
+                - mountPath: /etc/serviceaccount
+                  name: cloud-secret
+                  readOnly: true
+          volumes:
+            - name: cloud-config
+              configMap:
+                name: stackit-cloud-config
+            - name: cloud-secret
+              secret:
+                secretName: stackit-cloud-secret
