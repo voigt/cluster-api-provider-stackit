@@ -16,12 +16,15 @@ package scope
 import (
 	"context"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util/patch"
 
 	infrav1 "github.com/voigt/cluster-api-provider-stackit/api/v1alpha1"
+	"github.com/voigt/cluster-api-provider-stackit/cloud"
+	"github.com/voigt/cluster-api-provider-stackit/util"
 )
 
 // ClusterScope holds the per-reconcile state for a StackitCluster.
@@ -61,4 +64,38 @@ func (s *ClusterScope) PatchObject(ctx context.Context) error {
 		infrav1.ClusterCredentialsReadyCondition,
 		clusterv1.PausedCondition,
 	}})
+}
+
+func (s *ClusterScope) SetConditions(status metav1.ConditionStatus, reason, message string, conditionTypes ...string) {
+	util.SetConditions(&s.StackitCluster.Status.Conditions, s.StackitCluster.Generation, status, reason, message, conditionTypes...)
+}
+
+func (s *ClusterScope) SetReady() {
+	s.StackitCluster.Status.Ready = true
+	s.StackitCluster.Status.Initialization.Provisioned = true
+	s.SetConditions(metav1.ConditionTrue, "Available", "", infrav1.ClusterReadyCondition)
+}
+
+func (s *ClusterScope) SetNotReady(reason, message string, conditionTypes ...string) {
+	s.StackitCluster.Status.Ready = false
+	s.SetConditions(metav1.ConditionFalse, reason, message, conditionTypes...)
+}
+
+func (s *ClusterScope) SetAPIServerEndpoint(endpoint clusterv1.APIEndpoint) {
+	s.StackitCluster.Spec.ControlPlaneEndpoint = endpoint
+	s.StackitCluster.Status.APIServerEndpoint = endpoint
+}
+
+func (s *ClusterScope) SetBastionStatus(bastion *cloud.Bastion, cloudInitHash string) {
+	s.StackitCluster.Status.Bastion = infrav1.StackitBastionStatus{
+		ServerID:        bastion.ServerID,
+		PublicIPID:      bastion.PublicIPID,
+		PublicIP:        bastion.PublicIP,
+		SecurityGroupID: bastion.SecurityGroupID,
+		CloudInitHash:   cloudInitHash,
+	}
+}
+
+func (s *ClusterScope) ClearBastionStatus() {
+	s.StackitCluster.Status.Bastion = infrav1.StackitBastionStatus{}
 }

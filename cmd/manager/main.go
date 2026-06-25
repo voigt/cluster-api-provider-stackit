@@ -37,9 +37,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	infrastructurev1alpha1 "github.com/voigt/cluster-api-provider-stackit/api/v1alpha1"
-	"github.com/voigt/cluster-api-provider-stackit/internal/controller"
-	webhookv1alpha1 "github.com/voigt/cluster-api-provider-stackit/internal/webhook/v1alpha1"
-	"github.com/voigt/cluster-api-provider-stackit/pkg/cloud"
+	"github.com/voigt/cluster-api-provider-stackit/cloud"
+	"github.com/voigt/cluster-api-provider-stackit/controller"
+	webhookv1alpha1 "github.com/voigt/cluster-api-provider-stackit/webhook/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -186,6 +186,7 @@ func main() {
 		Client:             mgr.GetClient(),
 		Scheme:             mgr.GetScheme(),
 		CloudClientFactory: cloud.NewClient,
+		Recorder:           mgr.GetEventRecorderFor("stackitcluster-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "stackitcluster")
 		os.Exit(1)
@@ -194,6 +195,7 @@ func main() {
 		Client:             mgr.GetClient(),
 		Scheme:             mgr.GetScheme(),
 		CloudClientFactory: cloud.NewClient,
+		Recorder:           mgr.GetEventRecorderFor("stackitmachine-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "stackitmachine")
 		os.Exit(1)

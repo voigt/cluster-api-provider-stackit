@@ -705,7 +705,7 @@ func (c *SDKClient) ensureBastionSecurityGroupRules(ctx context.Context, securit
 		if hasSSHRule(existingRules, cidr) {
 			continue
 		}
-		protocol := iaas.StringAsCreateProtocol(ptrTo(tcpProtocol))
+		protocol := iaas.StringAsCreateProtocol(new(tcpProtocol))
 		rule := iaas.NewCreateSecurityGroupRulePayload("ingress")
 		rule.SetIpRange(cidr)
 		rule.SetPortRange(*iaas.NewPortRange(sshPort, sshPort))
@@ -733,7 +733,7 @@ func (c *SDKClient) ensureNodeSSHSecurityGroupRule(
 	if hasRemoteSecurityGroupSSHRule(resp.GetItems(), bastionSecurityGroupID) {
 		return nil
 	}
-	protocol := iaas.StringAsCreateProtocol(ptrTo(tcpProtocol))
+	protocol := iaas.StringAsCreateProtocol(new(tcpProtocol))
 	rule := iaas.NewCreateSecurityGroupRulePayload("ingress")
 	rule.SetRemoteSecurityGroupId(bastionSecurityGroupID)
 	rule.SetPortRange(*iaas.NewPortRange(sshPort, sshPort))
@@ -1035,10 +1035,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func ptrTo[T any](value T) *T {
-	return &value
 }
 
 func classifySDKError(op string, err error) error {

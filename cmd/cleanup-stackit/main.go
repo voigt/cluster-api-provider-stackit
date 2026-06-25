@@ -15,8 +15,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/voigt/cluster-api-provider-stackit/pkg/cloud"
-	"github.com/voigt/cluster-api-provider-stackit/pkg/util"
+	"github.com/voigt/cluster-api-provider-stackit/cloud"
+	"github.com/voigt/cluster-api-provider-stackit/util"
 )
 
 const (

@@ -13,12 +13,15 @@ package scope
 import (
 	"context"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util/patch"
 
 	infrav1 "github.com/voigt/cluster-api-provider-stackit/api/v1alpha1"
+	"github.com/voigt/cluster-api-provider-stackit/cloud"
+	"github.com/voigt/cluster-api-provider-stackit/util"
 )
 
 // MachineScope holds the per-reconcile state for a StackitMachine.
@@ -64,4 +67,43 @@ func (s *MachineScope) PatchObject(ctx context.Context) error {
 		infrav1.MachineInstanceReadyCondition,
 		clusterv1.PausedCondition,
 	}})
+}
+
+func (s *MachineScope) SetConditions(status metav1.ConditionStatus, reason, message string, conditionTypes ...string) {
+	util.SetConditions(&s.StackitMachine.Status.Conditions, s.StackitMachine.Generation, status, reason, message, conditionTypes...)
+}
+
+func (s *MachineScope) SetReady() {
+	s.StackitMachine.Status.Ready = true
+	s.SetConditions(metav1.ConditionTrue, "Available", "", infrav1.MachineInstanceReadyCondition, infrav1.MachineReadyCondition)
+}
+
+func (s *MachineScope) SetNotReady(reason, message string, conditionTypes ...string) {
+	s.StackitMachine.Status.Ready = false
+	s.SetConditions(metav1.ConditionFalse, reason, message, conditionTypes...)
+}
+
+func (s *MachineScope) Tags() map[string]string {
+	return util.MachineTags(
+		s.Cluster.Name,
+		s.Cluster.Namespace,
+		s.Machine.Name,
+		string(s.Machine.UID),
+		s.StackitMachine.Spec.AdditionalLabels,
+	)
+}
+
+func (s *MachineScope) SetInstance(server *cloud.Server) string {
+	providerID := cloud.NewProviderID(s.StackitCluster.Spec.ProjectID, s.StackitCluster.Spec.Region, server.ID)
+	s.StackitMachine.Status.InstanceID = server.ID
+	s.StackitMachine.Status.InstanceState = server.State
+	s.StackitMachine.Spec.ProviderID = &providerID
+	s.StackitMachine.Status.ProviderID = providerID
+	s.StackitMachine.Status.Initialization.Provisioned = true
+	return providerID
+}
+
+func (s *MachineScope) ClearInstance() {
+	s.StackitMachine.Status.InstanceID = ""
+	s.StackitMachine.Status.InstanceState = ""
 }

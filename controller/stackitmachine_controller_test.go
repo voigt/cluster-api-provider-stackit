@@ -26,9 +26,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	infrav1 "github.com/voigt/cluster-api-provider-stackit/api/v1alpha1"
-	"github.com/voigt/cluster-api-provider-stackit/pkg/cloud"
-	cloudfake "github.com/voigt/cluster-api-provider-stackit/pkg/cloud/fake"
-	"github.com/voigt/cluster-api-provider-stackit/pkg/util"
+	"github.com/voigt/cluster-api-provider-stackit/cloud"
+	cloudfake "github.com/voigt/cluster-api-provider-stackit/cloud/fake"
+	"github.com/voigt/cluster-api-provider-stackit/util"
 )
 
 var _ = Describe("StackitMachine Controller", func() {
@@ -283,6 +283,7 @@ var _ = Describe("StackitMachine Controller", func() {
 		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
 		updateMachineControlPlaneLabel(ctx, machineName, namespace)
 		enableStackitClusterLoadBalancer(ctx, clusterName, namespace)
+		reconcileStackitClusterOnce(ctx, clusterName, namespace, fakeCloud)
 		createBootstrapSecret(ctx, bootstrapName)
 
 		result, err := reconciler.Reconcile(ctx, request)
@@ -319,6 +320,7 @@ var _ = Describe("StackitMachine Controller", func() {
 		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
 		updateMachineControlPlaneLabel(ctx, machineName, namespace)
 		enableStackitClusterLoadBalancer(ctx, clusterName, namespace)
+		reconcileStackitClusterOnce(ctx, clusterName, namespace, fakeCloud)
 		createBootstrapSecret(ctx, bootstrapName)
 		_, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())

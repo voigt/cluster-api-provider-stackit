@@ -14,8 +14,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/voigt/cluster-api-provider-stackit/pkg/cloud"
-	cloudfake "github.com/voigt/cluster-api-provider-stackit/pkg/cloud/fake"
+	"github.com/voigt/cluster-api-provider-stackit/cloud"
+	cloudfake "github.com/voigt/cluster-api-provider-stackit/cloud/fake"
 )
 
 func TestCleanupByTagsDeletesMatchingCloudResources(t *testing.T) {
